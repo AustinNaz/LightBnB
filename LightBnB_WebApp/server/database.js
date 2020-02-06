@@ -93,15 +93,58 @@ exports.getAllReservations = getAllReservations;
  * @return {Promise<[{}]>}  A promise to the properties.
  */
 const getAllProperties = function(options, limit = 10) {
-  return pool.query(`
-  SELECT * FROM properties
-  LIMIT $1
-  `, [limit])
-  .then(res => {
-    return res.rows
-  }).catch(err => {
-    console.log(err)
-  })
+
+  const queryParams = [];
+
+  let queryString = 
+  `SELECT properties.*, AVG(rating) as average_rating
+  FROM properties
+  JOIN property_reviews ON properties.id = property_id`
+
+  if (options.city) {
+    queryParams.push(`%${options.city}%`);
+    queryString += ` WHERE city LIKE $${queryParams.length} `;
+  }
+
+  if (options.owner_id) {
+    queryParams.push(options.owner_id);
+    if (queryString.includes('WHERE')) {
+      queryString += `and properties.owner_id = $${queryParams.length} ` 
+    } else {
+      queryString += ` WHERE properties.owner_id = $${queryParams.length} ` 
+    }
+  }
+
+  if (options.minimum_price_per_night && options.maximum_price_per_night) {
+    queryParams.push(options.minimum_price_per_night * 100, options.maximum_price_per_night * 100);
+    if (queryString.includes('WHERE')) {
+      queryString += `and properties.cost_per_night > $${queryParams.length - 1} and properties.cost_per_night < $${queryParams.length} ` 
+    } else {
+      queryString += ` WHERE properties.cost_per_night > $${queryParams.length - 1} and properties.cost_per_night < $${queryParams.length}`
+    }
+  }
+
+  queryString += `
+  GROUP BY properties.id `
+
+  if (options.minimum_rating) {
+    if (queryString.includes('GROUP BY')) {
+      startIndex = queryString.indexOf('ORDER BY');
+    }
+    queryParams.push(options.minimum_rating);
+    queryString += ` HAVING AVG(rating) >= $${queryParams.length} `
+  }
+  
+  queryParams.push(limit);
+  queryString += `
+  ORDER BY cost_per_night
+  LIMIT $${queryParams.length};
+  `;
+
+
+  return pool.query(queryString, queryParams)
+  .then(res => res.rows)
+  .catch(err => console.log(err));
 }
 exports.getAllProperties = getAllProperties;
 
